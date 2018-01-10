@@ -61,17 +61,11 @@ ESC = "\x1b"
 #: *Delete*: Is ignored.
 DEL = "\x7f"
 
-#: *Control sequence introducer*.
-CSI_C0 = ESC + "["
-CSI_C1 = "\x9b"
-CSI = CSI_C0
+#: *Control sequence introducer*: An equivalent for ``ESC [``.
+CSI = "\x9b"
 
 #: *String terminator*.
-ST_C0 = ESC + "\\"
-ST_C1 = "\x9c"
-ST = ST_C0
+ST = "\x9c"
 
 #: *Operating system command*.
-OSC_C0 = ESC + "]"
-OSC_C1 = "\x9d"
-OSC = OSC_C0
+OSC = "\x9d"

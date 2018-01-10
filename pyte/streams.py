@@ -117,7 +117,8 @@ class Stream(object):
         esc.SGR: "select_graphic_rendition",
         esc.DSR: "report_device_status",
         esc.DECSTBM: "set_margins",
-        esc.HPA: "cursor_to_column"
+        esc.HPA: "cursor_to_column",
+        esc.GLYPH: "set_glyph"
     }
 
     #: A set of all events dispatched by the stream.
@@ -129,7 +130,7 @@ class Stream(object):
 
     #: A regular expression pattern matching everything what can be
     #: considered plain text.
-    _special = set([ctrl.ESC, ctrl.CSI_C1, ctrl.NUL, ctrl.DEL, ctrl.OSC_C1])
+    _special = set([ctrl.ESC, ctrl.CSI, ctrl.NUL, ctrl.DEL, ctrl.OSC])
     _special.update(basic)
     _text_pattern = re.compile(
         "[^" + "".join(map(re.escape, _special)) + "]+")
@@ -213,14 +214,13 @@ class Stream(object):
         draw = listener.draw
         debug = listener.debug
 
-        ESC, CSI_C1 = ctrl.ESC, ctrl.CSI_C1
-        OSC_C1 = ctrl.OSC_C1
+        ESC, CSI = ctrl.ESC, ctrl.CSI
+        OSC, ST = ctrl.OSC, ctrl.ST
         SP_OR_GT = ctrl.SP + ">"
         NUL_OR_DEL = ctrl.NUL + ctrl.DEL
         CAN_OR_SUB = ctrl.CAN + ctrl.SUB
         ALLOWED_IN_CSI = "".join([ctrl.BEL, ctrl.BS, ctrl.HT, ctrl.LF,
                                   ctrl.VT, ctrl.FF, ctrl.CR])
-        OSC_TERMINATORS = set([ctrl.ST_C0, ctrl.ST_C1, ctrl.BEL])
 
         def create_dispatcher(mapping):
             return defaultdict(lambda: debug, dict(
@@ -252,9 +252,9 @@ class Stream(object):
                 #    are noop.
                 char = yield
                 if char == "[":
-                    char = CSI_C1  # Go to CSI.
+                    char = CSI  # Go to CSI.
                 elif char == "]":
-                    char = OSC_C1  # Go to OSC.
+                    char = OSC  # Go to OSC.
                 else:
                     if char == "#":
                         sharp_dispatch[(yield)]()
@@ -276,11 +276,11 @@ class Stream(object):
                 # Ignore shifts in UTF-8 mode. See
                 # http://www.cl.cam.ac.uk/~mgk25/unicode.html#term for
                 # the why on UTF-8 restriction.
-                if (char == ctrl.SI or char == ctrl.SO) and self.use_utf8:
+                if char == ctrl.SI or char == ctrl.SO and self.use_utf8:
                     continue
 
                 basic_dispatch[char]()
-            elif char == CSI_C1:
+            elif char == CSI:
                 # All parameters are unsigned, positive decimal integers, with
                 # the most significant digit sent first. Any parameter greater
                 # than 9999 is set to 9999. If you do not specify a value, a 0
@@ -325,7 +325,7 @@ class Stream(object):
                             else:
                                 csi_dispatch[char](*params)
                             break  # CSI is finished.
-            elif char == OSC_C1:
+            elif char == OSC:
                 code = yield
                 if code == "R":
                     continue  # Reset palette. Not implemented.
@@ -335,9 +335,7 @@ class Stream(object):
                 param = ""
                 while True:
                     char = yield
-                    if char == ESC:
-                        char += yield
-                    if char in OSC_TERMINATORS:
+                    if char == ST or char == ctrl.BEL:
                         break
                     else:
                         param += char

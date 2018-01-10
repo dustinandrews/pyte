@@ -77,6 +77,8 @@ class Char(namedtuple("Char", [
     "underscore",
     "strikethrough",
     "reverse",
+    "window",
+    "glyph"
 ])):
     """A single styled on-screen character.
 
@@ -87,8 +89,8 @@ class Char(namedtuple("Char", [
                       Defaults to ``False``.
     :param bool italics: flag for rendering the character using italic font.
                          Defaults to ``False``.
-    :param bool underscore: flag for rendering the character underlined.
-                            Defaults to ``False``.
+    :param bool underline: flag for rendering the character underlined.
+                           Defaults to ``False``.
     :param bool strikethrough: flag for rendering the character with a
                                strike-through line. Defaults to ``False``.
     :param bool reverse: flag for swapping foreground and background colours
@@ -98,9 +100,10 @@ class Char(namedtuple("Char", [
 
     def __new__(cls, data, fg="default", bg="default", bold=False,
                 italics=False, underscore=False,
-                strikethrough=False, reverse=False):
+                strikethrough=False, reverse=False,
+                window=False, glyph=False):
         return super(Char, cls).__new__(cls, data, fg, bg, bold, italics,
-                                        underscore, strikethrough, reverse)
+                                        underscore, strikethrough, reverse, window, glyph)
 
 
 class Cursor(object):
@@ -210,11 +213,8 @@ class Screen(object):
        for a description of the presentational component, implemented
        by ``Screen``.
     """
-    @property
-    def default_char(self):
-        """An empty character with default foreground and background colors."""
-        reverse = mo.DECSCNM in self.mode
-        return Char(data=" ", fg="default", bg="default", reverse=reverse)
+    #: An empty character with default foreground and background colors.
+    default_char = Char(data=" ", fg="default", bg="default")
 
     def __init__(self, columns, lines):
         self.savepoints = []
@@ -281,8 +281,6 @@ class Screen(object):
 
         self.cursor = Cursor(0, 0)
         self.cursor_position()
-
-        self.saved_columns = None
 
     def resize(self, lines=None, columns=None):
         """Resize the screen to the given size.
@@ -377,7 +375,6 @@ class Screen(object):
         # When DECOLM mode is set, the screen is erased and the cursor
         # moves to the home position.
         if mo.DECCOLM in modes:
-            self.saved_columns = self.columns
             self.resize(columns=132)
             self.erase_in_display(2)
             self.cursor_position()
@@ -389,7 +386,6 @@ class Screen(object):
         # Mark all displayed characters as reverse.
         if mo.DECSCNM in modes:
             for line in self.buffer.values():
-                line.default = self.default_char
                 for x in line:
                     line[x] = line[x]._replace(reverse=True)
 
@@ -416,9 +412,7 @@ class Screen(object):
 
         # Lines below follow the logic in :meth:`set_mode`.
         if mo.DECCOLM in modes:
-            if self.columns == 132 and self.saved_columns is not None:
-                self.resize(columns=self.saved_columns)
-                self.saved_columns = None
+            self.resize(columns=80)
             self.erase_in_display(2)
             self.cursor_position()
 
@@ -427,7 +421,6 @@ class Screen(object):
 
         if mo.DECSCNM in modes:
             for line in self.buffer.values():
-                line.default = self.default_char
                 for x in line:
                     line[x] = line[x]._replace(reverse=False)
 
@@ -958,6 +951,26 @@ class Screen(object):
             for x in range(self.columns):
                 self.buffer[y][x] = self.buffer[y][x]._replace(data="E")
 
+    def set_glyph(self, *attrs):
+        if not attrs or attrs == (0, ):
+            return
+        replace = {}
+        attr = attrs[0]
+
+        if attr == 0:
+            replace['glyph'] = attrs[1]
+            #print(replace)
+            if self.cursor.attrs.glyph != None and self.cursor.attrs.glyph != False:
+                replace['glyph'] = attrs[1]
+                #print(replace)
+        if attr == 2:
+            #print(attrs)
+            replace['window'] = attrs[1]
+
+        if attr in [0]:
+            self.cursor.attrs = self.cursor.attrs._replace(**replace)
+            #print(self.cursor.attrs, self.cursor.x, self.cursor.y)
+
     def select_graphic_rendition(self, *attrs):
         """Set display attributes.
 
@@ -967,17 +980,16 @@ class Screen(object):
 
         # Fast path for resetting all attributes.
         if not attrs or attrs == (0, ):
+            replace['glyph'] = self.cursor.attrs.glyph
             self.cursor.attrs = self.default_char
+            self.cursor.attrs = self.cursor.attrs._replace(**replace)
             return
         else:
             attrs = list(reversed(attrs))
 
         while attrs:
             attr = attrs.pop()
-            if attr == 0:
-                # Reset all attributes.
-                replace.update(self.default_char._asdict())
-            elif attr in g.FG_ANSI:
+            if attr in g.FG_ANSI:
                 replace["fg"] = g.FG_ANSI[attr]
             elif attr in g.BG:
                 replace["bg"] = g.BG_ANSI[attr]
@@ -1004,7 +1016,9 @@ class Screen(object):
                 except IndexError:
                     pass
 
+        #print(replace)
         self.cursor.attrs = self.cursor.attrs._replace(**replace)
+        #print(self.cursor.attrs, self.cursor.x, self.cursor.y)
 
     def report_device_attributes(self, mode=0, **kwargs):
         """Report terminal identity.
@@ -1124,7 +1138,7 @@ class HistoryScreen(Screen):
     _wrapped.update(["next_page", "prev_page"])
 
     def __init__(self, columns, lines, history=100, ratio=.5):
-        self.history = History(deque(maxlen=history),
+        self.history = History(deque(maxlen=history // 2),
                                deque(maxlen=history),
                                float(ratio),
                                history,
@@ -1173,7 +1187,7 @@ class HistoryScreen(Screen):
         # If we're at the bottom of the history buffer and `DECTCEM`
         # mode is set -- show the cursor.
         self.cursor.hidden = not (
-            self.history.position == self.history.size and
+            abs(self.history.position - self.history.size) < self.lines and
             mo.DECTCEM in self.mode
         )
 
@@ -1229,7 +1243,7 @@ class HistoryScreen(Screen):
                 self.buffer[y]
                 for y in range(self.lines - 1, self.lines - mid - 1, -1))
             self.history = self.history \
-                ._replace(position=self.history.position - mid)
+                ._replace(position=self.history.position - self.lines)
 
             for y in range(self.lines - 1, mid - 1, -1):
                 self.buffer[y] = self.buffer[y - mid]
@@ -1246,7 +1260,7 @@ class HistoryScreen(Screen):
 
             self.history.top.extend(self.buffer[y] for y in range(mid))
             self.history = self.history \
-                ._replace(position=self.history.position + mid)
+                ._replace(position=self.history.position + self.lines)
 
             for y in range(self.lines - mid):
                 self.buffer[y] = self.buffer[y + mid]

@@ -13,6 +13,9 @@
 """
 from __future__ import unicode_literals
 
+#: Nethack Glyph
+GLYPH = "z"
+
 #: *Reset*.
 RIS = "c"
 
