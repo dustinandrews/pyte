@@ -36,6 +36,7 @@ import sys
 import unicodedata
 import warnings
 from collections import deque, namedtuple, defaultdict
+import numpy as np
 
 from wcwidth import wcwidth
 
@@ -214,7 +215,7 @@ class Screen(object):
        by ``Screen``.
     """
     #: An empty character with default foreground and background colors.
-    default_char = Char(data=" ", fg="default", bg="default")
+    default_char = Char(data=" ", fg="default", bg="default", window=0, glyph=0)
 
     def __init__(self, columns, lines):
         self.savepoints = []
@@ -223,13 +224,16 @@ class Screen(object):
         self.buffer = defaultdict(lambda: StaticDefaultDict(self.default_char))
         self.dirty = set()
         self.reset()
+        self.glyph_map = np.zeros((lines,columns), dtype=np.int32)
+        self.char_map = np.zeros((lines,columns), dtype=np.string_)
+        self.char_map.fill(b' ')
 
     def __repr__(self):
         return ("{0}({1}, {2})".format(self.__class__.__name__,
                                        self.columns, self.lines))
 
     @property
-    def display(self):
+    def display2(self):
         """A :func:`list` of screen lines as unicode strings."""
         def render(line):
             is_wide_char = False
@@ -243,6 +247,10 @@ class Screen(object):
                 yield char
 
         return ["".join(render(self.buffer[y])) for y in range(self.lines)]
+
+    @property
+    def display(self):
+        return ["".join(row) for row in np.char.decode(self.char_map)]
 
     def reset(self):
         """Reset the terminal to its initial state.
@@ -491,8 +499,12 @@ class Screen(object):
                 self.insert_characters(char_width)
 
             line = self.buffer[self.cursor.y]
+            self.glyph_map[self.cursor.y, self.cursor.x] = self.cursor.attrs.glyph
+            self.char_map[self.cursor.y, self.cursor.x] = char
+
             if char_width == 1:
                 line[self.cursor.x] = self.cursor.attrs._replace(data=char)
+
             elif char_width == 2:
                 # A two-cell character has a stub slot after it.
                 line[self.cursor.x] = self.cursor.attrs._replace(data=char)
@@ -724,10 +736,12 @@ class Screen(object):
         self.dirty.add(self.cursor.y)
         count = count or 1
 
-        line = self.buffer[self.cursor.y]
+        y = self.cursor.y
+        line = self.buffer[y]
         for x in range(self.cursor.x,
                        min(self.cursor.x + count, self.columns)):
             line[x] = self.cursor.attrs
+            self.char_map[y, x] = self.cursor.attrs.data
 
     def erase_in_line(self, how=0, private=False):
         """Erase a line in a specific way.
@@ -751,10 +765,11 @@ class Screen(object):
             interval = range(self.cursor.x + 1)
         elif how == 2:
             interval = range(self.columns)
-
-        line = self.buffer[self.cursor.y]
+        y = self.cursor.y
+        line = self.buffer[y]
         for x in interval:
             line[x] = self.cursor.attrs
+            self.char_map[y,x] = self.cursor.attrs.data
 
     def erase_in_display(self, how=0, private=False):
         """Erases display in a specific way.
@@ -785,6 +800,7 @@ class Screen(object):
             line = self.buffer[y]
             for x in line:
                 line[x] = self.cursor.attrs
+                self.char_map[y,x] = self.cursor.attrs.data
 
         if how == 0 or how == 1:
             self.erase_in_line(how)
@@ -980,7 +996,9 @@ class Screen(object):
 
         # Fast path for resetting all attributes.
         if not attrs or attrs == (0, ):
+            # Preserve special nethack formatting that may preceed a clear
             replace['glyph'] = self.cursor.attrs.glyph
+            replace['window'] = self.cursor.attrs.window
             self.cursor.attrs = self.default_char
             self.cursor.attrs = self.cursor.attrs._replace(**replace)
             return
@@ -1018,6 +1036,7 @@ class Screen(object):
 
         #print(replace)
         self.cursor.attrs = self.cursor.attrs._replace(**replace)
+
         #print(self.cursor.attrs, self.cursor.x, self.cursor.y)
 
     def report_device_attributes(self, mode=0, **kwargs):
