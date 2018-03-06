@@ -224,8 +224,6 @@ class Screen(object):
         self.buffer = defaultdict(lambda: StaticDefaultDict(self.default_char))
         self.dirty = set()
         self.reset()
-        self.glyph_map = np.zeros((lines,columns), dtype=np.int32)
-        self.char_map = np.zeros((lines,columns), dtype=np.string_)
         self.char_map.fill(b' ')
 
     def __repr__(self):
@@ -271,6 +269,8 @@ class Screen(object):
         """
         self.dirty.update(range(self.lines))
         self.buffer.clear()
+        self.glyph_map = np.zeros((self.lines,self.columns), dtype=np.int32)
+        self.char_map = np.zeros((self.lines,self.columns), dtype=np.string_)
         self.margins = None
 
         self.mode = set([mo.DECAWM, mo.DECTCEM])
@@ -800,7 +800,8 @@ class Screen(object):
             line = self.buffer[y]
             for x in line:
                 line[x] = self.cursor.attrs
-                self.char_map[y,x] = self.cursor.attrs.data
+                self.char_map[y,x] = b' '
+                self.glyph_map[y,x] = 0
 
         if how == 0 or how == 1:
             self.erase_in_line(how)
